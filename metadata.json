@@ -1,0 +1,6 @@
+{
+  "name": "Night Out Planner",
+  "description": "A hybrid form and conversational assistant to plan the perfect night out, with Google Maps, reviews analysis, and interactive chat refinements.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
