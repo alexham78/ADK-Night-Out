@@ -31,6 +31,7 @@ import {
   ExternalLink,
   Utensils,
   ChevronUp,
+  ChevronDown,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -172,9 +173,114 @@ function NightOutPlannerCore() {
   const [conversationalResponse, setConversationalResponse] = useState<string>("");
   const [activeRestaurantId, setActiveRestaurantId] = useState<string | null>(null);
 
+  // User custom embedded YouTube video IDs per restaurant
+  const [embeddedVideos, setEmbeddedVideos] = useState<Record<string, { id: string; isShort: boolean }>>({});
+  const [showVideoInputId, setShowVideoInputId] = useState<string | null>(null);
+  const [videoInputText, setVideoInputText] = useState("");
+  const [videoErrorId, setVideoErrorId] = useState<string | null>(null);
+
+  // Helper to extract YouTube video ID from standard URLs or Short URLs
+  const extractYoutubeId = (url: string): string | null => {
+    if (!url) return null;
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|shorts\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+  };
+
   // Map settings
   const [mapCenter, setMapCenter] = useState({ lat: 37.7749, lng: -122.4194 }); // default SF
   const [mapZoom, setMapZoom] = useState(12);
+
+  // YouTube Shorts Feed States
+  const [rightPanelTab, setRightPanelTab] = useState<"map" | "shorts">("map");
+  const [shortsList, setShortsList] = useState<any[]>([]);
+  const [currentShortIndex, setCurrentShortIndex] = useState<number>(0);
+  const [isLoadingShorts, setIsLoadingShorts] = useState<boolean>(false);
+  const [shortsError, setShortsError] = useState<string | null>(null);
+  const [shortsMessage, setShortsMessage] = useState<string | null>(null);
+  const [lastFetchedRestaurantId, setLastFetchedRestaurantId] = useState<string | null>(null);
+
+  // Fetch Shorts / Videos for a specific restaurant
+  const fetchShortsForRestaurant = async (restaurantId: string, force = false) => {
+    const spot = candidates.find((c) => c.id === restaurantId);
+    if (!spot) return;
+    if (lastFetchedRestaurantId === restaurantId && !force && shortsList.length > 0) return;
+
+    setIsLoadingShorts(true);
+    setShortsError(null);
+    setShortsMessage(null);
+
+    try {
+      const res = await fetch(
+        `/api/youtube-shorts?restaurantName=${encodeURIComponent(spot.displayName)}&city=${encodeURIComponent(preferences.city || "")}`
+      );
+      if (!res.ok) {
+        throw new Error("Failed to search YouTube Shorts");
+      }
+      const data = await res.json();
+      if (data.videos && data.videos.length > 0) {
+        setShortsList(data.videos);
+        setCurrentShortIndex(0);
+        if (data.isDemo) {
+          setShortsMessage(data.message);
+        }
+      } else {
+        setShortsList([]);
+        setShortsError(`No video reviews found on YouTube for "${spot.displayName}".`);
+      }
+      setLastFetchedRestaurantId(restaurantId);
+    } catch (err: any) {
+      console.error(err);
+      setShortsError(err.message || "Failed to load live Shorts feed.");
+    } finally {
+      setIsLoadingShorts(false);
+    }
+  };
+
+  // Fetch general city shorts
+  const fetchGeneralCityShorts = async () => {
+    setIsLoadingShorts(true);
+    setShortsError(null);
+    setShortsMessage(null);
+
+    try {
+      const cityName = preferences.city || "restaurants";
+      const res = await fetch(
+        `/api/youtube-shorts?restaurantName=${encodeURIComponent(cityName + " best restaurants review")}&city=${encodeURIComponent(preferences.city || "")}`
+      );
+      if (!res.ok) {
+        throw new Error("Failed to search YouTube Shorts");
+      }
+      const data = await res.json();
+      if (data.videos && data.videos.length > 0) {
+        setShortsList(data.videos);
+        setCurrentShortIndex(0);
+        if (data.isDemo) {
+          setShortsMessage(data.message);
+        }
+      } else {
+        setShortsList([]);
+        setShortsError("No video results found.");
+      }
+      setLastFetchedRestaurantId("general");
+    } catch (err: any) {
+      console.error(err);
+      setShortsError(err.message || "Failed to load live Shorts feed.");
+    } finally {
+      setIsLoadingShorts(false);
+    }
+  };
+
+  // Load shorts dynamically based on active selection
+  useEffect(() => {
+    if (rightPanelTab === "shorts") {
+      if (activeRestaurantId) {
+        fetchShortsForRestaurant(activeRestaurantId);
+      } else {
+        fetchGeneralCityShorts();
+      }
+    }
+  }, [activeRestaurantId, rightPanelTab]);
 
   // Mobile navigation tabs: 'list' (restaurants/yelp), 'map', 'chat' (refinement conversation)
   const [viewMode, setViewMode] = useState<"list" | "map" | "chat">("list");
@@ -1058,21 +1164,21 @@ function NightOutPlannerCore() {
 
             {/* LEFT COLUMN: Yelp-style Recommendations & Review Scanner */}
             <div
-              className={`flex-1 flex flex-col border-r border-slate-900 bg-slate-950 lg:max-w-xl xl:max-w-2xl h-full overflow-hidden ${
+              className={`flex-1 flex flex-col border-r border-slate-900 bg-slate-950 lg:max-w-2xl xl:max-w-3xl h-full overflow-hidden ${
                 viewMode === "list" ? "block" : "hidden lg:flex"
               }`}
             >
               {/* Summary / Flow banner from Gemini */}
-              <div className="bg-slate-900/40 p-4 border-b border-slate-900">
-                <div className="flex items-start gap-3 bg-indigo-950/20 rounded-2xl p-4 border border-indigo-500/10">
-                  <div className="w-8 h-8 rounded-lg bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center flex-shrink-0 text-indigo-400 mt-0.5">
-                    <Sparkles className="w-4.5 h-4.5" />
+              <div className="bg-slate-900/40 p-3 border-b border-slate-900">
+                <div className="flex items-start gap-2.5 bg-indigo-950/20 rounded-xl p-3 border border-indigo-500/10">
+                  <div className="w-7 h-7 rounded-lg bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center flex-shrink-0 text-indigo-400 mt-0.5">
+                    <Sparkles className="w-4 h-4" />
                   </div>
                   <div>
-                    <h3 className="text-xs font-display font-semibold uppercase tracking-wider text-indigo-400 mb-1">
+                    <h3 className="text-[10px] font-display font-semibold uppercase tracking-wider text-indigo-400 mb-0.5">
                       Concierge Plan Draft
                     </h3>
-                    <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                    <p className="text-xs text-slate-300 leading-relaxed">
                       {conversationalResponse || "Generating re-ranking insights..."}
                     </p>
                   </div>
@@ -1115,9 +1221,9 @@ function NightOutPlannerCore() {
                           {rec.score}% Match
                         </div>
 
-                        <div className="flex gap-4">
+                        <div className="flex gap-4.5">
                           {/* Photo Placeholder/Actual Thumbnail */}
-                          <div className="w-16 h-16 sm:w-20 sm:h-20 bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex-shrink-0 flex items-center justify-center relative">
+                          <div className="w-20 h-20 sm:w-24 sm:h-24 bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex-shrink-0 flex items-center justify-center relative">
                             {spot.photoUrl ? (
                               <img
                                 src={spot.photoUrl}
@@ -1126,16 +1232,16 @@ function NightOutPlannerCore() {
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                               />
                             ) : (
-                              <Utensils className="w-6 h-6 text-slate-700" />
+                              <Utensils className="w-8 h-8 text-slate-700" />
                             )}
-                            <div className="absolute bottom-1.5 left-1.5 w-5 h-5 bg-slate-900/80 backdrop-blur-sm rounded-md flex items-center justify-center border border-slate-800 font-mono text-xs font-bold text-indigo-400">
+                            <div className="absolute bottom-1.5 left-1.5 w-5.5 h-5.5 bg-slate-900/80 backdrop-blur-sm rounded-md flex items-center justify-center border border-slate-800 font-mono text-xs font-bold text-indigo-400">
                               {index + 1}
                             </div>
                           </div>
 
                           {/* Restaurant Info */}
                           <div className="flex-1 min-w-0 pr-16">
-                            <h3 className="font-display font-bold text-base text-white group-hover:text-indigo-400 transition-colors truncate">
+                            <h3 className="font-display font-bold text-base sm:text-lg text-white group-hover:text-indigo-400 transition-colors truncate">
                               {spot.displayName}
                             </h3>
 
@@ -1187,19 +1293,133 @@ function NightOutPlannerCore() {
                           </div>
                         )}
 
-                        {/* Website link */}
-                        {spot.websiteUri && (
-                          <div className="mt-3 flex justify-end">
+                        {/* Embedded YouTube video or Short */}
+                        {embeddedVideos[spot.id] && (
+                          <div className="mt-4 bg-slate-950/60 p-3 rounded-xl border border-slate-900/80" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[10px] uppercase font-mono tracking-wider text-indigo-400 font-bold flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                                Live Restaurant Short
+                              </span>
+                              <button
+                                onClick={() => {
+                                  const next = { ...embeddedVideos };
+                                  delete next[spot.id];
+                                  setEmbeddedVideos(next);
+                                }}
+                                className="text-[10px] font-mono text-rose-400 hover:text-rose-300 hover:underline"
+                              >
+                                Remove Video
+                              </button>
+                            </div>
+                            <div className="flex justify-center">
+                              <iframe
+                                className={`w-full rounded-lg border border-slate-800 shadow-inner ${
+                                  embeddedVideos[spot.id].isShort ? "aspect-[9/16] max-w-[240px]" : "aspect-video"
+                                }`}
+                                src={`https://www.youtube.com/embed/${embeddedVideos[spot.id].id}`}
+                                title="YouTube video player"
+                                frameBorder="0"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                allowFullScreen
+                              ></iframe>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Website & YouTube Links */}
+                        <div className="mt-4 pt-3 border-t border-slate-900/40 flex items-center justify-between flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-2">
+                            {/* Search YouTube Shorts Button */}
+                            <a
+                              href={`https://www.youtube.com/results?search_query=${encodeURIComponent(spot.displayName + " " + preferences.city + " shorts")}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] font-mono text-slate-300 hover:text-indigo-400 flex items-center gap-1.5 bg-slate-950/60 px-2.5 py-1.5 rounded-lg border border-slate-900 hover:border-indigo-500/20 transition-all font-semibold"
+                            >
+                              <svg className="w-3.5 h-3.5 text-rose-500 fill-current" viewBox="0 0 24 24">
+                                <path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.11C19.517 3.545 12 3.545 12 3.545s-7.517 0-9.388.507a3.003 3.003 0 0 0-2.11 2.11C0 8.033 0 12 0 12s0 3.967.502 5.837a3.003 3.003 0 0 0 2.11 2.11c1.871.507 9.388.507 9.388.507s7.517 0 9.388-.507a3.003 3.003 0 0 0 2.11-2.11C24 15.967 24 12 24 12s0-3.967-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                              </svg>
+                              Search Shorts
+                            </a>
+
+                            {/* Embed Video Button */}
+                            <button
+                              onClick={() => {
+                                if (showVideoInputId === spot.id) {
+                                  setShowVideoInputId(null);
+                                } else {
+                                  setShowVideoInputId(spot.id);
+                                  setVideoInputText("");
+                                  setVideoErrorId(null);
+                                }
+                              }}
+                              className="text-[11px] font-mono text-slate-300 hover:text-indigo-400 flex items-center gap-1.5 bg-slate-950/60 px-2.5 py-1.5 rounded-lg border border-slate-900 hover:border-indigo-500/20 transition-all font-semibold"
+                            >
+                              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                              {embeddedVideos[spot.id] ? "Change Video" : "Embed Short"}
+                            </button>
+                          </div>
+
+                          {spot.websiteUri && (
                             <a
                               href={spot.websiteUri}
                               target="_blank"
                               rel="noopener noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="text-[11px] font-mono text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1"
+                              className="text-[11px] font-mono text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1 font-semibold"
                             >
                               Visit Website
                               <ExternalLink className="w-3 h-3" />
                             </a>
+                          )}
+                        </div>
+
+                        {/* Inline input for pasting YouTube URL */}
+                        {showVideoInputId === spot.id && (
+                          <div className="mt-3 bg-slate-950 p-3 rounded-xl border border-indigo-500/20" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-[10px] font-mono text-indigo-400 font-bold">Paste YouTube Video or Shorts URL:</span>
+                              <button onClick={() => setShowVideoInputId(null)} className="text-slate-500 hover:text-slate-300">
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={videoInputText}
+                                onChange={(e) => {
+                                  setVideoInputText(e.target.value);
+                                  setVideoErrorId(null);
+                                }}
+                                placeholder="https://youtube.com/shorts/... or https://youtu.be/..."
+                                className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500/50 font-sans"
+                              />
+                              <button
+                                onClick={() => {
+                                  const videoId = extractYoutubeId(videoInputText);
+                                  if (videoId) {
+                                    const isShort = videoInputText.includes("shorts") || videoInputText.includes("/v/");
+                                    setEmbeddedVideos({
+                                      ...embeddedVideos,
+                                      [spot.id]: { id: videoId, isShort },
+                                    });
+                                    setShowVideoInputId(null);
+                                    setVideoInputText("");
+                                    setVideoErrorId(null);
+                                  } else {
+                                    setVideoErrorId(spot.id);
+                                  }
+                                }}
+                                className="bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs px-3 py-1.5 rounded-lg font-bold transition-colors"
+                              >
+                                Save
+                              </button>
+                            </div>
+                            {videoErrorId === spot.id && (
+                              <p className="text-[10px] text-rose-400 mt-1.5 font-sans">
+                                Invalid URL. Please paste a standard YouTube link or Shorts link.
+                              </p>
+                            )}
                           </div>
                         )}
                       </motion.div>
@@ -1209,105 +1429,348 @@ function NightOutPlannerCore() {
               </div>
             </div>
 
-            {/* MIDDLE COLUMN: Interactive Google Map (Yelp Style) */}
+            {/* MIDDLE COLUMN: Interactive Google Map / Live YouTube Shorts Feed */}
             <div
-              className={`flex-1 h-full relative border-r border-slate-900 ${
+              className={`flex-1 h-full relative border-r border-slate-900 bg-slate-950 ${
                 viewMode === "map" ? "block" : "hidden lg:block"
               }`}
             >
-              {/* Map Overlay to display list count */}
-              <div className="absolute top-4 left-4 z-10 bg-slate-950/80 backdrop-blur-md border border-slate-800 rounded-xl px-4 py-2.5 shadow-xl flex items-center gap-2.5 text-xs">
-                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse" />
-                <span className="font-medium text-slate-200">
-                  {preferences.city}: Showing {candidates.length} ranked restaurants
-                </span>
+              {/* Modern Segmented Tab Switcher (Top Right Overlay) */}
+              <div className="absolute top-4 right-4 z-20 flex bg-slate-950/90 backdrop-blur-md border border-slate-800/80 p-1 rounded-xl shadow-2xl items-center gap-1">
+                <button
+                  onClick={() => setRightPanelTab("map")}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg font-mono transition-all flex items-center gap-1.5 ${
+                    rightPanelTab === "map"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20 font-bold"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <MapIcon className="w-3.5 h-3.5" />
+                  Map View
+                </button>
+                <button
+                  onClick={() => setRightPanelTab("shorts")}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg font-mono transition-all flex items-center gap-1.5 relative ${
+                    rightPanelTab === "shorts"
+                      ? "bg-rose-600 text-white shadow-md shadow-rose-500/20 font-bold"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <svg className="w-3.5 h-3.5 text-white fill-current" viewBox="0 0 24 24">
+                    <path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.11C19.517 3.545 12 3.545 12 3.545s-7.517 0-9.388.507a3.003 3.003 0 0 0-2.11 2.11C0 8.033 0 12 0 12s0 3.967.502 5.837a3.003 3.003 0 0 0 2.11 2.11c1.871.507 9.388.507 9.388.507s7.517 0 9.388-.507a3.003 3.003 0 0 0 2.11-2.11C24 15.967 24 12 24 12s0-3.967-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                  </svg>
+                  Shorts Feed
+                  <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-rose-500 ring-4 ring-slate-950 animate-pulse" />
+                </button>
               </div>
 
-              {/* Map Box */}
-              <div className="w-full h-full min-h-[300px]">
-                <Map
-                  center={mapCenter}
-                  zoom={mapZoom}
-                  mapId="DEMO_MAP_ID"
-                  onCenterChanged={(e) => setMapCenter(e.detail.center)}
-                  onZoomChanged={(e) => setMapZoom(e.detail.zoom)}
-                  internalUsageAttributionIds={["gmp_mcp_codeassist_v1_aistudio"]}
-                  style={{ width: "100%", height: "100%" }}
-                  gestureHandling="cooperative"
-                >
-                  {/* Render Candidates on Map */}
-                  {candidates.map((spot, index) => {
-                    if (!spot.location) return null;
+              {/* RENDER TAB 1: Google Map */}
+              {rightPanelTab === "map" ? (
+                <>
+                  {/* Map Overlay to display list count */}
+                  <div className="absolute top-4 left-4 z-10 bg-slate-950/80 backdrop-blur-md border border-slate-800 rounded-xl px-4 py-2.5 shadow-xl flex items-center gap-2.5 text-xs">
+                    <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse" />
+                    <span className="font-medium text-slate-200">
+                      {preferences.city}: Showing {candidates.length} ranked restaurants
+                    </span>
+                  </div>
 
-                    const isSelected = activeRestaurantId === spot.id;
-                    const matchingRec = recommendations.find((r) => r.id === spot.id);
-                    const rankNum = index + 1;
+                  {/* Map Box */}
+                  <div className="w-full h-full min-h-[300px]">
+                    <Map
+                      center={mapCenter}
+                      zoom={mapZoom}
+                      mapId="DEMO_MAP_ID"
+                      onCenterChanged={(e) => setMapCenter(e.detail.center)}
+                      onZoomChanged={(e) => setMapZoom(e.detail.zoom)}
+                      internalUsageAttributionIds={["gmp_mcp_codeassist_v1_aistudio"]}
+                      style={{ width: "100%", height: "100%" }}
+                      gestureHandling="cooperative"
+                    >
+                      {/* Render Candidates on Map */}
+                      {candidates.map((spot, index) => {
+                        if (!spot.location) return null;
 
-                    return (
-                      <AdvancedMarker
-                        key={spot.id}
-                        position={spot.location}
-                        onClick={() => {
-                          setActiveRestaurantId(spot.id);
-                          setMapCenter(spot.location!);
-                          setMapZoom(15);
-                        }}
-                      >
-                        <Pin
-                          background={isSelected ? "#ec4899" : "#6366f1"}
-                          borderColor={isSelected ? "#be185d" : "#4f46e5"}
-                          glyphColor="#fff"
-                          glyphText={matchingRec ? `${rankNum}` : ""}
-                        />
-                      </AdvancedMarker>
-                    );
-                  })}
+                        const isSelected = activeRestaurantId === spot.id;
+                        const matchingRec = recommendations.find((r) => r.id === spot.id);
+                        const rankNum = index + 1;
 
-                  {/* Info Window for selected restaurant */}
-                  {activeRestaurantId && (
-                    (() => {
-                      const selectedSpot = candidates.find((c) => c.id === activeRestaurantId);
-                      const matchingRec = recommendations.find((r) => r.id === activeRestaurantId);
-                      if (!selectedSpot || !selectedSpot.location) return null;
+                        return (
+                          <AdvancedMarker
+                            key={spot.id}
+                            position={spot.location}
+                            onClick={() => {
+                              setActiveRestaurantId(spot.id);
+                              setMapCenter(spot.location!);
+                              setMapZoom(15);
+                            }}
+                          >
+                            <Pin
+                              background={isSelected ? "#ec4899" : "#6366f1"}
+                              borderColor={isSelected ? "#be185d" : "#4f46e5"}
+                              glyphColor="#fff"
+                              glyphText={matchingRec ? `${rankNum}` : ""}
+                            />
+                          </AdvancedMarker>
+                        );
+                      })}
 
-                      return (
-                        <InfoWindow
-                          position={selectedSpot.location}
-                          onCloseClick={() => setActiveRestaurantId(null)}
+                      {/* Info Window for selected restaurant */}
+                      {activeRestaurantId && (
+                        (() => {
+                          const selectedSpot = candidates.find((c) => c.id === activeRestaurantId);
+                          const matchingRec = recommendations.find((r) => r.id === activeRestaurantId);
+                          if (!selectedSpot || !selectedSpot.location) return null;
+
+                          return (
+                            <InfoWindow
+                              position={selectedSpot.location}
+                              onCloseClick={() => setActiveRestaurantId(null)}
+                            >
+                              <div className="text-slate-900 max-w-[240px] p-1 font-sans">
+                                <h4 className="font-bold text-sm leading-tight text-slate-900">
+                                  {selectedSpot.displayName}
+                                </h4>
+                                <div className="flex items-center gap-1.5 mt-1 text-xs">
+                                  <span className="flex items-center text-amber-500 font-bold">
+                                    ★ {selectedSpot.rating || "N/A"}
+                                  </span>
+                                  <span className="text-slate-500">
+                                    ({selectedSpot.userRatingCount || 0})
+                                  </span>
+                                  <span className="text-indigo-600 font-mono font-bold">
+                                    {renderPriceLevel(selectedSpot.priceLevel)}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-600 mt-1 leading-normal">
+                                  {selectedSpot.formattedAddress}
+                                </p>
+                                {matchingRec && (
+                                  <div className="mt-2 pt-1.5 border-t border-slate-100">
+                                    <p className="text-[11px] leading-relaxed text-slate-700 italic">
+                                      <strong className="text-indigo-600 font-mono">{matchingRec.score}% Match:</strong>{" "}
+                                      {matchingRec.matchReason.slice(0, 80)}...
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            </InfoWindow>
+                          );
+                        })()
+                      )}
+                    </Map>
+                  </div>
+                </>
+              ) : (
+                /* RENDER TAB 2: Live YouTube Shorts Feed (TikTok Style Swipe-Up Layout) */
+                <div className="w-full h-full flex flex-col bg-slate-950 p-4 relative overflow-hidden select-none">
+                  
+                  {/* Top Feed Header */}
+                  <div className="mb-3 pr-40">
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-rose-500 flex items-center gap-1.5 mb-1">
+                      <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                      Live Culinary Shorts
+                    </span>
+                    <h3 className="font-display font-bold text-sm sm:text-base text-slate-100 truncate">
+                      {activeRestaurantId ? (
+                        <>📍 {candidates.find((c) => c.id === activeRestaurantId)?.displayName}</>
+                      ) : (
+                        <>🔍 Dining Highlights in {preferences.city || "Area"}</>
+                      )}
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5 leading-tight">
+                      {activeRestaurantId ? "Dynamic YouTube Shorts review matching this spot" : "Popular restaurant tours & culinary reviews"}
+                    </p>
+                  </div>
+
+                  {/* Immersive Swipe Player Container */}
+                  <div className="flex-1 flex items-center justify-center relative min-h-[350px]">
+                    
+                    {isLoadingShorts ? (
+                      <div className="flex flex-col items-center gap-3 text-center p-8 bg-slate-900/30 border border-slate-900 rounded-3xl max-w-sm">
+                        <Loader2 className="w-10 h-10 text-rose-500 animate-spin" />
+                        <h4 className="font-display font-semibold text-sm text-slate-200">Searching YouTube API...</h4>
+                        <p className="text-xs text-slate-400 leading-normal">
+                          Fetching real-time Shorts and culinary footage for this restaurant recommendation...
+                        </p>
+                      </div>
+                    ) : shortsError ? (
+                      <div className="flex flex-col items-center gap-4 text-center p-8 bg-slate-900/40 border border-rose-500/10 rounded-3xl max-w-sm">
+                        <div className="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                          <Utensils className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h4 className="font-display font-semibold text-sm text-slate-200">Feed Offline</h4>
+                          <p className="text-xs text-slate-400 leading-relaxed mt-1.5 px-2">
+                            {shortsError}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => activeRestaurantId ? fetchShortsForRestaurant(activeRestaurantId, true) : fetchGeneralCityShorts()}
+                          className="px-4 py-2 bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-200 rounded-xl hover:border-indigo-500 transition-colors"
                         >
-                          <div className="text-slate-900 max-w-[240px] p-1 font-sans">
-                            <h4 className="font-bold text-sm leading-tight text-slate-900">
-                              {selectedSpot.displayName}
-                            </h4>
-                            <div className="flex items-center gap-1.5 mt-1 text-xs">
-                              <span className="flex items-center text-amber-500 font-bold">
-                                ★ {selectedSpot.rating || "N/A"}
-                              </span>
-                              <span className="text-slate-500">
-                                ({selectedSpot.userRatingCount || 0})
-                              </span>
-                              <span className="text-indigo-600 font-mono font-bold">
-                                {renderPriceLevel(selectedSpot.priceLevel)}
-                              </span>
-                            </div>
-                            <p className="text-[11px] text-slate-600 mt-1 leading-normal">
-                              {selectedSpot.formattedAddress}
-                            </p>
-                            {matchingRec && (
-                              <div className="mt-2 pt-1.5 border-t border-slate-100">
-                                <p className="text-[11px] leading-relaxed text-slate-700 italic">
-                                  <strong className="text-indigo-600 font-mono">{matchingRec.score}% Match:</strong>{" "}
-                                  {matchingRec.matchReason.slice(0, 80)}...
+                          Retry Search
+                        </button>
+                      </div>
+                    ) : shortsList.length > 0 ? (
+                      (() => {
+                        const video = shortsList[currentShortIndex];
+                        const activeRec = recommendations.find((r) => r.id === activeRestaurantId);
+
+                        // Trigger next video cycle
+                        const handleNext = () => {
+                          if (currentShortIndex < shortsList.length - 1) {
+                            setCurrentShortIndex(currentShortIndex + 1);
+                          }
+                        };
+
+                        // Trigger previous video cycle
+                        const handlePrev = () => {
+                          if (currentShortIndex > 0) {
+                            setCurrentShortIndex(currentShortIndex - 1);
+                          }
+                        };
+
+                        return (
+                          <div className="relative w-full h-full max-h-[85vh] flex items-center justify-center">
+                            
+                            {/* Outer simulated smartphone container for YouTube Short */}
+                            <motion.div
+                              drag="y"
+                              dragConstraints={{ top: 0, bottom: 0 }}
+                              dragElastic={0.3}
+                              onDragEnd={(e, info) => {
+                                if (info.offset.y < -70) {
+                                  handleNext();
+                                } else if (info.offset.y > 70) {
+                                  handlePrev();
+                                }
+                              }}
+                              className="relative aspect-[9/16] w-full max-w-[280px] sm:max-w-[310px] h-[92%] max-h-[580px] bg-black rounded-3xl border-4 border-slate-900 shadow-2xl shadow-rose-950/20 overflow-hidden flex items-center justify-center"
+                            >
+                              {/* YouTube iframe player */}
+                              <iframe
+                                className="w-full h-full object-cover"
+                                src={`https://www.youtube.com/embed/${video.id}?autoplay=1&mute=1&loop=1&playlist=${video.id}&controls=0&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`}
+                                title={video.title}
+                                frameBorder="0"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                allowFullScreen
+                              ></iframe>
+
+                              {/* Gradient bottom overlay for video details readability */}
+                              <div className="absolute bottom-0 left-0 right-0 h-44 bg-gradient-to-t from-slate-950 via-slate-950/60 to-transparent pointer-events-none z-10" />
+
+                              {/* Video Details Overlay (Aligned bottom left of frame) */}
+                              <div className="absolute bottom-4 left-3.5 right-3.5 z-10 flex flex-col gap-1.5 text-left pointer-events-none">
+                                {activeRestaurantId && (
+                                  <div className="inline-flex self-start items-center gap-1.5 bg-rose-600/90 backdrop-blur-md px-2 py-1 rounded-lg text-[9px] font-bold text-white uppercase tracking-wider shadow-md">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                                    {activeRec ? `${activeRec.score}% match` : "Recommend"}
+                                  </div>
+                                )}
+                                <p className="text-white font-bold text-[11px] sm:text-xs leading-snug drop-shadow-md line-clamp-2">
+                                  {video.title}
+                                </p>
+                                <p className="text-slate-300 font-mono text-[9px] sm:text-[10px] font-semibold flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                  @{video.channelTitle || "creator"}
                                 </p>
                               </div>
-                            )}
+
+                              {/* Drag/Swipe instructions overlay (Only displays on index 0 briefly) */}
+                              {currentShortIndex === 0 && (
+                                <div className="absolute top-8 left-1/2 -translate-x-1/2 z-10 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 flex items-center gap-1.5 text-[9px] font-mono font-semibold text-slate-300 animate-bounce pointer-events-none">
+                                  <ChevronUp className="w-3 h-3 text-rose-500 animate-pulse" />
+                                  Swipe Up for Next Short
+                                </div>
+                              )}
+                            </motion.div>
+
+                            {/* Sidebar Action Menu (Classic TikTok/Shorts vertical button rail) */}
+                            <div className="absolute right-2 sm:right-6 md:right-8 flex flex-col items-center gap-4 z-10">
+                              
+                              {/* Cycle UP / Previous Button */}
+                              <button
+                                onClick={handlePrev}
+                                disabled={currentShortIndex === 0}
+                                className={`w-10 h-10 rounded-full border flex items-center justify-center shadow-lg transition-all ${
+                                  currentShortIndex === 0
+                                    ? "bg-slate-900/30 border-slate-900/40 text-slate-700 cursor-not-allowed"
+                                    : "bg-slate-900/80 border-slate-800 text-slate-200 hover:text-rose-400 hover:border-rose-500/40 hover:scale-105 active:scale-95"
+                                }`}
+                                title="Previous Short (Swipe Down)"
+                              >
+                                <ChevronUp className="w-5 h-5" />
+                              </button>
+
+                              {/* Feed Index Counter Bubble */}
+                              <div className="flex flex-col items-center gap-0.5">
+                                <span className="font-mono text-[11px] font-black text-rose-500">
+                                  0{currentShortIndex + 1}
+                                </span>
+                                <span className="w-3 h-px bg-slate-800" />
+                                <span className="font-mono text-[9px] font-bold text-slate-500">
+                                  0{shortsList.length}
+                                </span>
+                              </div>
+
+                              {/* Cycle DOWN / Next Button */}
+                              <button
+                                onClick={handleNext}
+                                disabled={currentShortIndex === shortsList.length - 1}
+                                className={`w-10 h-10 rounded-full border flex items-center justify-center shadow-lg transition-all ${
+                                  currentShortIndex === shortsList.length - 1
+                                    ? "bg-slate-900/30 border-slate-900/40 text-slate-700 cursor-not-allowed"
+                                    : "bg-slate-900/80 border-slate-800 text-slate-200 hover:text-rose-400 hover:border-rose-500/40 hover:scale-105 active:scale-95"
+                                }`}
+                                title="Next Short (Swipe Up)"
+                              >
+                                <ChevronDown className="w-5 h-5" />
+                              </button>
+
+                              {/* Outer YouTube Launch Button */}
+                              <a
+                                href={`https://www.youtube.com/watch?v=${video.id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="w-10 h-10 rounded-full bg-rose-600 border border-rose-500 flex items-center justify-center text-white hover:bg-rose-500 transition-all shadow-lg hover:scale-105"
+                                title="Open in YouTube App"
+                              >
+                                <svg className="w-4.5 h-4.5 fill-current" viewBox="0 0 24 24">
+                                  <path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.11C19.517 3.545 12 3.545 12 3.545s-7.517 0-9.388.507a3.003 3.003 0 0 0-2.11 2.11C0 8.033 0 12 0 12s0 3.967.502 5.837a3.003 3.003 0 0 0 2.11 2.11c1.871.507 9.388.507 9.388.507s7.517 0 9.388-.507a3.003 3.003 0 0 0 2.11-2.11C24 15.967 24 12 24 12s0-3.967-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                                </svg>
+                              </a>
+
+                              {/* Animated record disk */}
+                              <div className="flex flex-col items-center mt-2">
+                                <div className="w-7 h-7 rounded-full bg-slate-900 border-2 border-slate-800 flex items-center justify-center animate-[spin_5s_linear_infinite] shadow-md relative overflow-hidden">
+                                  <div className="w-2.5 h-2.5 rounded-full bg-rose-600" />
+                                </div>
+                              </div>
+
+                            </div>
                           </div>
-                        </InfoWindow>
-                      );
-                    })()
+                        );
+                      })()
+                    ) : (
+                      <div className="text-center py-10">No videos loaded.</div>
+                    )}
+
+                  </div>
+
+                  {/* Bottom Alerts & Mode status (Informs user about Secrets setup) */}
+                  {shortsMessage && (
+                    <div className="absolute bottom-4 left-4 right-4 z-15 bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-xl p-2.5 shadow-xl flex items-center gap-2 text-[10px]">
+                      <Sparkles className="w-3.5 h-3.5 text-rose-400 flex-shrink-0 animate-pulse" />
+                      <p className="text-slate-300 leading-tight">
+                        {shortsMessage}
+                      </p>
+                    </div>
                   )}
-                </Map>
-              </div>
+
+                </div>
+              )}
             </div>
 
             {/* RIGHT COLUMN: AI Concierge Chat Sidebar (Always Visible on Large Screens, Tab on Mobile) */}
